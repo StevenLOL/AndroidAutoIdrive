@@ -22,21 +22,35 @@ import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import kotlinx.android.synthetic.main.fragment_notificationpage.*
+import kotlinx.android.synthetic.main.fragment_notificationpage.swMessageNotifications
+import me.hufman.androidautoidrive.AppSettings
+import me.hufman.androidautoidrive.MutableAppSettingsReceiver
 import me.hufman.androidautoidrive.R
 import me.hufman.androidautoidrive.phoneui.MainActivity
+import me.hufman.androidautoidrive.phoneui.UIState
 import me.hufman.androidautoidrive.phoneui.visible
 
 class NotificationPageFragment: Fragment() {
 	companion object {
 		const val NOTIFICATION_CHANNEL_ID = "TestNotification"
 		const val NOTIFICATION_CHANNEL_NAME = "Test Notification"
+		const val NOTIFICATION_SERVICE_TIMEOUT = 1000
 	}
+
+	val appSettings by lazy { MutableAppSettingsReceiver(requireContext()) }
+	var whenActivityStarted = 0L
+
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
 		return inflater.inflate(R.layout.fragment_notificationpage, container, false)
 	}
 
 	override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
 		super.onViewCreated(view, savedInstanceState)
+
+		swMessageNotifications.setOnCheckedChangeListener { _, isChecked ->
+			onChangedSwitchNotifications(isChecked)
+			redraw()
+		}
 
 		btnGrantSMS.setOnClickListener {
 			ActivityCompat.requestPermissions(requireActivity(), arrayOf(Manifest.permission.READ_SMS), 20)
@@ -73,6 +87,14 @@ class NotificationPageFragment: Fragment() {
 		}
 	}
 
+	override fun onResume() {
+		super.onResume()
+
+		whenActivityStarted = System.currentTimeMillis()
+
+		redraw()
+	}
+
 	private fun createNotificationChannel() {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 			val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID,
@@ -101,9 +123,22 @@ class NotificationPageFragment: Fragment() {
 		}
 	}
 
-	override fun onResume() {
-		super.onResume()
-		redraw()
+	fun onChangedSwitchNotifications(isChecked: Boolean) {
+		appSettings[AppSettings.KEYS.ENABLED_NOTIFICATIONS] = isChecked.toString()
+		if (isChecked) {
+			// make sure we have permissions to read the notifications
+			if (!hasNotificationPermission() || !UIState.notificationListenerConnected) {
+				promptNotificationPermission()
+			}
+		}
+	}
+
+	fun hasNotificationPermission(): Boolean {
+		return UIState.notificationListenerConnected && NotificationManagerCompat.getEnabledListenerPackages(requireContext()).contains(requireContext().packageName)
+	}
+
+	fun promptNotificationPermission() {
+		startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
 	}
 
 	fun hasSMSPermission(): Boolean {
@@ -111,6 +146,13 @@ class NotificationPageFragment: Fragment() {
 	}
 
 	fun redraw() {
+		val ageOfActivity = System.currentTimeMillis() - whenActivityStarted
+		if (ageOfActivity > NOTIFICATION_SERVICE_TIMEOUT && !hasNotificationPermission()) {
+			appSettings[AppSettings.KEYS.ENABLED_NOTIFICATIONS] = "false"
+		}
+
+		swMessageNotifications.isChecked = appSettings[AppSettings.KEYS.ENABLED_NOTIFICATIONS].toBoolean()
+		paneNotificationSettings.visible = appSettings[AppSettings.KEYS.ENABLED_NOTIFICATIONS].toBoolean()
 		paneSMSPermission.visible = !hasSMSPermission()
 	}
 
